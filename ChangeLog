@@ -1,0 +1,44 @@
+2009-09-15  Matt Novenstern  <mnovenstern@students.colgate.edu>
+
+	* facebook.lisp (establish-facebook-session): Fix typo session_key -> session-key
+	Thanks to Pamir <pamir@gursey.gov.tr>
+
+2009-04-23  Matt Novenstern  <mnovenstern@students.colgate.edu>
+
+	* facebook.lisp (load-session-from-file): Since desktop sessions don't seem to expire, why not save one for later use?
+	(save-session-to-file): ditto.
+	(get-assoc-value): Utility function for getting the values paired with keys in an alist
+
+2009-04-09  Matt Novenstern  <mnovenstern@students.colgate.edu>
+
+	* facebook.lisp (get-permission): Add documentation of the correct strings for permissions, so I stop wondering why it doesn't work, and then realize I'm requesting a permission that doesn't exist.
+	(post-link): New function - posts a link with url and comment attributes
+	(get-links): New function - retrieves links posted by the application
+	(revoke-permission): New function - revoke a permission gotten with get-permission
+	(events-rsvp): New function - rsvp to events the application owns
+	(events-getmembers): New function - get attendees of event
+	(users-getinfo): New function - get user info (fields) for listed people (uids)
+
+2009-04-03  Matt Novenstern  <mnovenstern@students.colgate.edu>
+
+	* cl-facebook.asd: Add contact info to package info, update dependancies to trivial-https
+	Add to repo.
+
+	* facebook.lisp:
+	(get-permission): make this function from old get_status_permission to be a generic permissions-getting function
+	(events-by-eids): New function for fetching events
+	(list-to-csv): for making comma-separated-value lists
+
+2009-04-01  Matt Novenstern  <mnovenstern@students.colgate.edu>
+
+	* facebook.lisp: 
+	(name-by-uid): Uses a FQL query to match a name to a uid
+	(get-status): Get the current user's status
+
+2009-03-31  Matt Novenstern  <mnovenstern@students.colgate.edu>
+
+	* facebook.lisp: 
+	(facebook-set-status): Add new function
+	(publish-action-of-user): Update to new API v1.0 and make the function work
+	(get-status-permission): New function to open a browser for permission-getting
+
