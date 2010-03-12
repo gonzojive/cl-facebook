@@ -600,10 +600,11 @@ are legitimate."
     (equal sig actual-sig)))
 
 (defun decode-form-params (params-alist secret)
-  "Verifies and decodes a request from a facebook server.  PARAMS-ALIST is (param-string . value)
-and secret is the secret key provided by facebook.
+  "Verifies and decodes a request from a facebook server.
+PARAMS-ALIST is (param-string . value) and secret is the secret key
+provided by facebook.
 
-Returns 4 values: 
+Returns 6 values: 
 1. T if valid, NIL if invalid
 IF VALID:
 2. profile uid
@@ -611,11 +612,7 @@ IF VALID:
 4. session key of person who clicked
 5. API key of the application
 TODO 6. time of submission (universally encoded)
-
-WAS GOING TO RETURN:
-1. user whose profile form was submitted from
-2. user who submitted
-3. time the submission occured"
+"
   (labels ((param (str &optional type)
 	     (let ((result (cdr (assoc str params-alist :test #'equal))))
 	       (case type
