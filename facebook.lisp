@@ -38,12 +38,15 @@
    #:make-session
    #:session-request
    #:facebook
+   ;; facebook connect
+   #:session-from-connect-cookies
    ;; Save session
    #:save-session-to-file
    #:load-session-from-file
    ;; methods for calling facebook API
    #:execute-query
 
+   #:stream-publish
    #:publish-action-of-user
    #:publish-story-to-user
    #:post-link
