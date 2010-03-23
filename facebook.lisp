@@ -34,6 +34,8 @@
    ;; Login/session getting methods
    #:facebook-auth-id
    #:facebook-login
+   #:facebook-login-uri
+   #:desktop-grant-permissions-uri
    #:establish-facebook-session
    #:make-session
    #:session-request
@@ -78,11 +80,6 @@
 
 (in-package :cl-facebook)
 
-;; (require 'trivial-https)
-;; (require 'md5)
-;; (require 'cl-json)
-;; (require 'cl-ppcre)
-
 (define-condition facebook-error (error)
   ()
   (:documentation "Any facebook error."))
@@ -104,9 +101,9 @@ a given user."))
 (defun detect-and-raise-errors (response)
   "Response is a JSON response from the Facebook server."
   (when (and (listp response) (listp (first response))
-	     (assoc :error_code response))
-    (let ((code (cdr (assoc :error_code response)))
-	  (message (cdr (assoc :error_msg response))))
+	     (assoc :error--code response))
+    (let ((code (cdr (assoc :error--code response)))
+	  (message (cdr (assoc :error--msg response))))
       (case code
 	(341 (error 'feed-action-limit-error :response response :message message))
 	(t (error 'facebook-server-error :response response :message message))))))
@@ -246,7 +243,7 @@ the content of the HTTP POST request."
   (let* ((prelim-args-alist
 	  (append args-alist `(("method" . ,facebook-method)
 			       ("api_key" . ,api-key)
-			       ("v" . "1.0")
+;			       ("v" . "1.0")
 			       )))
 	 (sig (generate-signature prelim-args-alist secret)))
     (let ((uri +rest-server-uri+))
@@ -263,7 +260,7 @@ the content of the HTTP POST request."
   (let* ((prelim-args-alist
 	 (append args-alist `(("method" . ,method)
 			      ("api_key" . ,api-key)
-			      ("v" . "1.0")
+;			      ("v" . "1.0")
 			      )))
 	 (sig (generate-signature prelim-args-alist secret)))
     (let ((uri
@@ -302,6 +299,9 @@ the facebook server.")
   (:method ((session facebook-session))
     (incf (current-call-id session))))
 
+(defun facebook-login-uri (api-key auth-id)
+  (format nil "http://facebook.com/login.php?api_key=~A&v=1.0&auth_token=~A" api-key auth-id))
+
 (defun facebook-login (api-key auth-id)
   (sb-ext:run-program "/usr/bin/xdg-open" `(,(format nil "http://facebook.com/login.php?api_key=~A&v=1.0&auth_token=~A" api-key auth-id))))
   
@@ -318,11 +318,14 @@ the facebook server.")
 
 (defun session-request (session method params)
   "Makes a Facebook API request with the current session and returns the decoded
-JSON response (which is usually an alist)."
+JSON response (which is usually an alist).
+
+See [How Facebook Authenticate Your Application](http://wiki.developers.facebook.com/index.php/How_Facebook_Authenticates_Your_Application)
+to understand how the signature is geenerated."
   (assert (session-secret session))
   (multiple-value-bind (uri post-content)
       (prepare-post-request
-       method (api-key session) (session-secret session)
+       method (api-key session) (secret session) ;(session-secret session)
        `(("format" . "json")
 	 ("call_id" . ,(format nil "~A" (next-call-id session)))
 	 ("session_key" . ,(session-key session))
@@ -354,6 +357,65 @@ to your application's page."
 	 'facebook-session
 	 :api-key api-key :secret secret :session-key session-key :uid uid :session-secret session-secret :expires expires)))))
 
+(defun parse-cookie-header (cookie-header)
+  "Parses a Cookie header according to rfc2109.
+
+   cookie          =       'Cookie:' cookie-version
+                           1*((';' | ',') cookie-value)
+   cookie-value    =       NAME '=' VALUE [';' path] [';' domain]
+   cookie-version  =       '$Version' '=' value
+   NAME            =       attr
+   VALUE           =       value
+   path            =       '$Path' '=' value
+   domain          =       '$Domain' '=' value"
+
+  ;; FIXME FIXME THIS DOES NOT CONFORM TO THE SPEC for handling cookies,
+  ;; but it does work.
+
+  (let* ((encoded-pairs (ppcre:split "\\s*;\\s*" cookie-header))
+         (decoded-pairs (mapcar #'(lambda (c)
+                                    (let ((x (ppcre:split "\\s*=\\s*" c)))
+                                      (cons (first x) (second x))))
+                                encoded-pairs)))
+    decoded-pairs))
+
+(defun session-from-connect-cookies (cookie-header fb-api-key fb-secret)
+  "Returns a session given a bunch of cookies.  COOKIE-HEADER is
+either an alist of key/val pairs of cookies, or a string that is the
+value of the `Cookie' header.  FB-API-KEY is the application api key
+and FB-SECREt is the application secret.
+
+See also [Verifying The
+Signature](http://wiki.developers.facebook.com/index.php/Verifying_The_Signature)
+on the Facebook Developer's wiki."
+  (let* ((cookie-keyvals (if (stringp cookie-header)
+                             (parse-cookie-header cookie-header)
+                             cookie-header))
+         (prefix (format nil "~A_" fb-api-key))
+         (sig-params
+          ;; strip the prefix
+          (mapcar (lambda (cons)
+                    (cons (subseq (car cons) (length prefix)) (cdr cons)))
+                  ;; remove stuff that doesn't start with the prefix
+                  (remove-if-not (lambda (x)
+                                   (let* ((mm (mismatch prefix (car x))))
+                                     (or (null mm)
+                                         (eql (length prefix) mm))))
+                                 cookie-keyvals)))
+         (their-sig (cdr (assoc fb-api-key cookie-keyvals :test #'string-equal)))
+         (our-sig (and their-sig sig-params
+                       (generate-signature sig-params fb-secret))))
+
+    (when (equal their-sig our-sig)
+      ;; yay! a valid set of cookies
+      (flet ((val (key) (cdr (assoc key sig-params :test #'equal))))
+        (let ((uid (parse-integer (val "user")))
+              (expires (parse-integer (val "expires")))
+              (session-secret (val "ss"))
+              (session-key (val "session_key")))
+          (fb:make-session :api-key fb-api-key :secret fb-secret
+                           :uid uid :session-secret session-secret :session-key session-key
+                           :expires expires))))))
 ;; news feed
 (defun publish-action-of-user (session title &key body images)
   "Publishes a story about a user to be displayed in the news feed section of her
@@ -368,6 +430,15 @@ IMAGES: a list of up to 4 images to display as part of the news feed image.  Eac
    `(("template_data" . ,(format nil "{\"story\":\"~A\"}" title))
      ("template_bundle_id" . "61931264134")
      ,@(when body (list (cons "body" body)))
+     )))
+
+(defun stream-publish (session message &key attachment action-links target-id uid)
+  "sess stream.publish in the docs"
+  (session-request
+   session "stream.publish"
+   `(("message" . ,message)
+     ,@(when uid (list (cons "uid" uid)))
+     ,@(when target-id (list (cons "target-id" target-id)))
      )))
 ;     ,@(let ((count 1))
 ;	    mapcar #'(lambda (img-item)
@@ -573,6 +644,19 @@ TODO 6. time of submission (universally encoded)
 
 (defun facebook-set-status (session status)
   (session-request session "status.set" `(("status" . ,status))))
+
+
+(defun desktop-grant-permissions-uri (api-key permissions &key next enable-profile-selector)
+  (let ((query (generate-post-content
+		`(("api_key" . ,api-key)
+		  ("fbcnnect" . "true")
+		  ("v" . "1.0")
+		  ("display" . "popup")
+		  ("ext_perm" . ,(format nil "~{~A~^,~}" permissions))
+		  ("extern" . "1")
+		  ("next" . ,next)
+		  ("enable_profile_selector" . ,(if enable-profile-selector "1" ""))))))
+  (format nil "http://www.facebook.com/connect/prompt_permissions.php?~A" query)))
 
 (defun get-permission (session permission)
   "Needs to be run once to get user to allow the program to change their status.
