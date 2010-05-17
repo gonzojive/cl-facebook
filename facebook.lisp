@@ -357,6 +357,82 @@ to your application's page."
 	 'facebook-session
 	 :api-key api-key :secret secret :session-key session-key :uid uid :session-secret session-secret :expires expires)))))
 
+
+(defmacro upgrade-vector (vector new-type &key converter)
+  "Returns a vector with the same length and the same elements as
+VECTOR \(a variable holding a vector) but having element type
+NEW-TYPE.  If CONVERTER is not NIL, it should designate a function
+which will be applied to each element of VECTOR before the result is
+stored in the new vector.  The resulting vector will have a fill
+pointer set to its end.
+
+The macro also uses SETQ to store the new vector in VECTOR."
+  `(setq ,vector
+         (loop with length = (length ,vector)
+               with new-vector = (make-array length
+                                             :element-type ,new-type
+                                             :fill-pointer length)
+               for i below length
+               do (setf (aref new-vector i) ,(if converter
+                                               `(funcall ,converter (aref ,vector i))
+                                               `(aref ,vector i)))
+               finally (return new-vector))))
+
+(defvar *default-external-format* (flexi-streams:make-external-format :latin1 :eol-style :lf))
+
+(defun url-decode (string &optional (external-format *default-external-format*))
+  "Decodes a URL-encoded STRING which is assumed to be encoded using
+the external format EXTERNAL-FORMAT."
+  (when (zerop (length string))
+    (return-from url-decode ""))
+  (let ((vector (make-array (length string) :element-type 'octet :fill-pointer 0))
+        (i 0)
+        unicodep)
+    (loop
+      (unless (< i (length string))
+        (return))
+      (let ((char (aref string i)))
+       (labels ((decode-hex (length)
+                  (prog1
+                      (parse-integer string :start i :end (+ i length) :radix 16)
+                    (incf i length)))
+                (push-integer (integer)
+                  (vector-push integer vector))
+                (peek ()
+                  (aref string i))
+                (advance ()
+                  (setq char (peek))
+                  (incf i)))
+         (cond
+          ((char= #\% char)
+           (advance)
+           (cond
+            ((char= #\u (peek))
+             (unless unicodep
+               (setq unicodep t)
+               (upgrade-vector vector '(integer 0 65535)))
+             (advance)
+             (push-integer (decode-hex 4)))
+            (t
+             (push-integer (decode-hex 2)))))
+          (t
+           (push-integer (char-code (case char
+                                      ((#\+) #\Space)
+                                      (otherwise char))))
+           (advance))))))
+    (cond (unicodep
+           (upgrade-vector vector 'character :converter #'code-char))
+          (t (flexi-streams:octets-to-string vector :external-format external-format)))))
+
+
+(defun url-query-decode (query-part)
+  "Returns an alist from a url-encoded query portion of a URL."
+  (mapcar #'(lambda (keyval-encoded)
+              (ppcre:register-groups-bind (key value)
+                  ("([^=]*)=([^=]*)" keyval-encoded)
+                (cons (url-decode key) (url-decode value))))
+          (ppcre:split "&" query-part)))
+
 (defun parse-cookie-header (cookie-header)
   "Parses a Cookie header according to rfc2109.
 
@@ -370,8 +446,16 @@ to your application's page."
    domain          =       '$Domain' '=' value"
 
   ;; FIXME FIXME THIS DOES NOT CONFORM TO THE SPEC for handling cookies,
-  ;; but it does work.
+  ;; but it does work sometimes.
 
+  (let ((results
+         (flexi-streams:with-input-from-sequence
+             (s (flexi-streams:string-to-octets (format nil ";~A" cookie-header)))
+           (chunga:with-character-stream-semantics
+             (chunga:read-name-value-pairs s :cookie-syntax t)))))
+    results)
+
+  #+nil
   (let* ((encoded-pairs (ppcre:split "\\s*;\\s*" cookie-header))
          (decoded-pairs (mapcar #'(lambda (c)
                                     (let ((x (ppcre:split "\\s*=\\s*" c)))
@@ -388,30 +472,40 @@ and FB-SECREt is the application secret.
 See also [Verifying The
 Signature](http://wiki.developers.facebook.com/index.php/Verifying_The_Signature)
 on the Facebook Developer's wiki."
+  (declare (optimize (debug 3)))
   (let* ((cookie-keyvals (if (stringp cookie-header)
                              (parse-cookie-header cookie-header)
                              cookie-header))
          (prefix (format nil "~A_" fb-api-key))
          (sig-params
-          ;; strip the prefix
-          (mapcar (lambda (cons)
-                    (cons (subseq (car cons) (length prefix)) (cdr cons)))
-                  ;; remove stuff that doesn't start with the prefix
-                  (remove-if-not (lambda (x)
-                                   (let* ((mm (mismatch prefix (car x))))
-                                     (or (null mm)
-                                         (eql (length prefix) mm))))
-                                 cookie-keyvals)))
-         (their-sig (cdr (assoc fb-api-key cookie-keyvals :test #'string-equal)))
+          (let ((connect2-cookie (cdr (assoc (format nil "fbs_~A" fb-api-key) cookie-keyvals
+                                             :test #'equal))))
+            (cond
+              (connect2-cookie
+               (url-query-decode connect2-cookie))
+              (t
+               ;; strip the prefix
+               (mapcar (lambda (cons)
+                         (cons (subseq (car cons) (length prefix)) (cdr cons)))
+                       ;; remove stuff that doesn't start with the prefix
+                       (remove-if-not (lambda (x)
+                                        (let* ((mm (mismatch prefix (car x))))
+                                          (or (null mm)
+                                              (eql (length prefix) mm))))
+                                      cookie-keyvals))))))
+         (their-sig (or (cdr (assoc "sig" sig-params :test #'equal)) ;; 2.0
+                        (cdr (assoc fb-api-key cookie-keyvals :test #'string-equal)))) ;; 1.0
          (our-sig (and their-sig sig-params
-                       (generate-signature sig-params fb-secret))))
+                       (generate-signature (remove "sig" sig-params :key #'car :test #'equal)
+                                           fb-secret))))
 
-    (when (equal their-sig our-sig)
+    (error "~A ~A" their-sig our-sig)
+    (when (and their-sig (equal their-sig our-sig))
       ;; yay! a valid set of cookies
       (flet ((val (key) (cdr (assoc key sig-params :test #'equal))))
-        (let ((uid (parse-integer (val "user")))
+        (let ((uid (parse-integer (or (val "user") (val "uid"))))
               (expires (parse-integer (val "expires")))
-              (session-secret (val "ss"))
+              (session-secret (or (val "secret") (val "ss")))
               (session-key (val "session_key")))
           (fb:make-session :api-key fb-api-key :secret fb-secret
                            :uid uid :session-secret session-secret :session-key session-key
