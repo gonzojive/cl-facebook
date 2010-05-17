@@ -499,7 +499,6 @@ on the Facebook Developer's wiki."
                        (generate-signature (remove "sig" sig-params :key #'car :test #'equal)
                                            fb-secret))))
 
-    (error "~A ~A" their-sig our-sig)
     (when (and their-sig (equal their-sig our-sig))
       ;; yay! a valid set of cookies
       (flet ((val (key) (cdr (assoc key sig-params :test #'equal))))
