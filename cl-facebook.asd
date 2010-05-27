@@ -12,5 +12,6 @@
   :licence "BSD"
   :description "A library for using the Facebook API."
   :components ((:static-file "cl-facebook.asd")
-                (:file "facebook"))
+               (:file "facebook")
+               (:file "graph-api" :depends-on ("facebook")))
   :depends-on (:drakma :md5 :cl-json :cl-ppcre :flexi-streams :chunga))
