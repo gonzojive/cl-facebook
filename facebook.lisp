@@ -24,6 +24,7 @@
    ;; facebook-session properties
    #:facebook-auth-id
    #:session-secret
+   #:session-access-token
    #:api-key
    #:secret
    #:session-key
@@ -42,6 +43,8 @@
    #:facebook
    ;; facebook connect
    #:session-from-connect-cookies
+   ;; Graph api
+   #:graph-request
    ;; Save session
    #:save-session-to-file
    #:load-session-from-file
@@ -276,6 +279,7 @@ the content of the HTTP POST request."
 
 (defclass facebook-session ()
   ((api-key :accessor api-key          :initarg :api-key)
+   (access-token  :accessor session-access-token           :initarg :access-token :initform nil)
    (secret  :accessor secret           :initarg :secret)
    (call-id :accessor current-call-id                        :initform 1)
    (session-key :accessor session-key  :initarg :session-key :initform nil)
@@ -306,7 +310,7 @@ the facebook server.")
   (sb-ext:run-program "/usr/bin/xdg-open" `(,(format nil "http://facebook.com/login.php?api_key=~A&v=1.0&auth_token=~A" api-key auth-id))))
   
 
-(defun make-session (&key api-key secret session-key uid session-secret expires)
+(defun make-session (&key api-key secret session-key uid session-secret expires access-token)
   (when (and api-key secret session-key uid session-secret)
     (make-instance 'facebook-session
 		   :api-key api-key
@@ -314,7 +318,8 @@ the facebook server.")
 		   :session-key session-key
 		   :session-secret session-secret
 		   :expires expires
-		   :uid uid)))
+		   :uid uid
+                   :access-token access-token)))
 
 (defun session-request (session method params)
   "Makes a Facebook API request with the current session and returns the decoded
@@ -505,8 +510,9 @@ on the Facebook Developer's wiki."
         (let ((uid (parse-integer (or (val "user") (val "uid"))))
               (expires (parse-integer (val "expires")))
               (session-secret (or (val "secret") (val "ss")))
-              (session-key (val "session_key")))
-          (fb:make-session :api-key fb-api-key :secret fb-secret
+              (session-key (val "session_key"))
+              (access-token (val "access_token")))
+          (fb:make-session :api-key fb-api-key :secret fb-secret :access-token access-token
                            :uid uid :session-secret session-secret :session-key session-key
                            :expires expires))))))
 ;; news feed

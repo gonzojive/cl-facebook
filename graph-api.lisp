@@ -2,7 +2,7 @@
 
 (defparameter *http-request-function* #'drakma:http-request)
 
-(defun graph-request (access-token path &key uri parameters (method :get))
+(defun graph-request (session-or-access-token path &key uri parameters (method :get))
   "
 Getting an object by ID:
 https://graph.facebook.com/ID
@@ -12,7 +12,10 @@ https://graph.facebook.com/ID/CONNECTION_TYPE
 
 see http://developers.facebook.com/docs/api#search
 "
-  (let ((uri (or uri
+  (let ((access-token (typecase session-or-access-token
+                        (string session-or-access-token)
+                        (facebook-session (session-access-token session-or-access-token))))
+        (uri (or uri
                  (format nil "https://graph.facebook.com/~A" path))))
     (graph-request-helper uri `(,@parameters ("access_token" . ,access-token))
                           :method method)))
