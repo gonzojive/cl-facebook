@@ -1,6 +1,6 @@
 (in-package :cl-facebook)
 
-(defparameter *http-request-function* #'drakma:http-request)
+(defparameter *http-request-function* 'drakma:http-request)
 
 (defun graph-request (session-or-access-token path &key uri parameters (method :get))
   "

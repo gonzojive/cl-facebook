@@ -1,5 +1,5 @@
 ;;; (c) 2009 Matt Novenstern <mnovenstern@students.colgate.edu>
-;;; (c) 2007 Red Daly
+;;; (c) 2007, 2010 Red Daly
 ;;;
 ;;; Released under the BSD license.
 
@@ -468,7 +468,7 @@ the external format EXTERNAL-FORMAT."
                                 encoded-pairs)))
     decoded-pairs))
 
-(defun session-from-connect-cookies (cookie-header fb-api-key fb-secret)
+(defun session-from-connect-cookies (cookie-header fb-api-key fb-secret &key app-id)
   "Returns a session given a bunch of cookies.  COOKIE-HEADER is
 either an alist of key/val pairs of cookies, or a string that is the
 value of the `Cookie' header.  FB-API-KEY is the application api key
@@ -481,9 +481,9 @@ on the Facebook Developer's wiki."
   (let* ((cookie-keyvals (if (stringp cookie-header)
                              (parse-cookie-header cookie-header)
                              cookie-header))
-         (prefix (format nil "~A_" fb-api-key))
+         (prefix (format nil "~A_" (or app-id fb-api-key)))
          (sig-params
-          (let ((connect2-cookie (cdr (assoc (format nil "fbs_~A" fb-api-key) cookie-keyvals
+          (let ((connect2-cookie (cdr (assoc (format nil "fbs_~A" (or app-id fb-api-key)) cookie-keyvals
                                              :test #'equal))))
             (cond
               (connect2-cookie
@@ -504,17 +504,18 @@ on the Facebook Developer's wiki."
                        (generate-signature (remove "sig" sig-params :key #'car :test #'equal)
                                            fb-secret))))
 
-    (when (and their-sig (equal their-sig our-sig))
-      ;; yay! a valid set of cookies
-      (flet ((val (key) (cdr (assoc key sig-params :test #'equal))))
-        (let ((uid (parse-integer (or (val "user") (val "uid"))))
-              (expires (parse-integer (val "expires")))
-              (session-secret (or (val "secret") (val "ss")))
-              (session-key (val "session_key"))
-              (access-token (val "access_token")))
-          (fb:make-session :api-key fb-api-key :secret fb-secret :access-token access-token
-                           :uid uid :session-secret session-secret :session-key session-key
-                           :expires expires))))))
+    (if (and their-sig (equal their-sig our-sig))
+        ;; yay! a valid set of cookies
+        (flet ((val (key) (cdr (assoc key sig-params :test #'equal))))
+          (let ((uid (parse-integer (or (val "user") (val "uid"))))
+                (expires (parse-integer (val "expires")))
+                (session-secret (or (val "secret") (val "ss")))
+                (session-key (val "session_key"))
+                (access-token (val "access_token")))
+            (fb:make-session :api-key fb-api-key :secret fb-secret :access-token access-token
+                             :uid uid :session-secret session-secret :session-key session-key
+                             :expires expires)))
+        (values nil t))))
 ;; news feed
 (defun publish-action-of-user (session title &key body images)
   "Publishes a story about a user to be displayed in the news feed section of her
